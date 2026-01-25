@@ -8,9 +8,19 @@ export class FileScanner {
    */
   async scan(dirPath: string): Promise<ScanResult> {
     const files: FileInfo[] = [];
-    await this.scanDir(dirPath, files);
+    const skippedFiles: string[] = [];
+    await this.scanDir(dirPath, files, skippedFiles);
 
     const totalSize = files.reduce((sum, f) => sum + f.size, 0);
+
+    // Warn about skipped files
+    if (skippedFiles.length > 0) {
+      console.warn(`Warning: Skipped ${skippedFiles.length} files that could not be read:`);
+      skippedFiles.slice(0, 10).forEach(f => console.warn(`  - ${f}`));
+      if (skippedFiles.length > 10) {
+        console.warn(`  ... and ${skippedFiles.length - 10} more`);
+      }
+    }
 
     return {
       files,
@@ -19,7 +29,7 @@ export class FileScanner {
     };
   }
 
-  private async scanDir(dirPath: string, files: FileInfo[]): Promise<void> {
+  private async scanDir(dirPath: string, files: FileInfo[], skippedFiles: string[]): Promise<void> {
     try {
       const entries = await readdir(dirPath, { withFileTypes: true });
 
@@ -32,7 +42,7 @@ export class FileScanner {
         }
 
         if (entry.isDirectory()) {
-          await this.scanDir(fullPath, files);
+          await this.scanDir(fullPath, files, skippedFiles);
         } else if (entry.isFile()) {
           try {
             const stats = await stat(fullPath);
@@ -41,8 +51,10 @@ export class FileScanner {
               name: entry.name,
               size: stats.size,
             });
-          } catch {
-            // Skip files we can't read
+          } catch (error) {
+            // Track files we can't read
+            skippedFiles.push(fullPath);
+            console.warn(`Cannot read file: ${fullPath} - ${error instanceof Error ? error.message : String(error)}`);
           }
         }
       }
