@@ -393,7 +393,7 @@ $volumeName = "${volumeName}"
 
 $ErrorActionPreference = "Stop"
 
-# Add C# helper to properly read from COM IStream
+# Add C# helpers: IStream wrapper for large files + IStream-to-file copier
 Add-Type -TypeDefinition @"
 using System;
 using System.IO;
@@ -403,8 +403,8 @@ using System.Runtime.InteropServices.ComTypes;
 public class IStreamHelper {
     public static void CopyStreamToFile(object comStream, string filePath) {
         IStream istream = (IStream)comStream;
-        using (FileStream fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write)) {
-            byte[] buffer = new byte[65536];
+        using (FileStream fileStream = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, 1048576)) {
+            byte[] buffer = new byte[1048576];
             IntPtr bytesReadPtr = Marshal.AllocCoTaskMem(sizeof(int));
             try {
                 while (true) {
@@ -420,6 +420,71 @@ public class IStreamHelper {
         }
     }
 }
+
+// Managed IStream implementation that wraps FileStream for large file support (>2GB)
+// ADODB.Stream is limited to ~2GB; this has no such limitation.
+public class ManagedIStream : IStream, IDisposable {
+    private FileStream _stream;
+
+    public ManagedIStream(string filePath) {
+        _stream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 1048576);
+    }
+
+    public void Read(byte[] pv, int cb, IntPtr pcbRead) {
+        int bytesRead = _stream.Read(pv, 0, cb);
+        if (pcbRead != IntPtr.Zero) Marshal.WriteInt32(pcbRead, bytesRead);
+    }
+
+    public void Write(byte[] pv, int cb, IntPtr pcbWritten) {
+        throw new NotImplementedException();
+    }
+
+    public void Seek(long dlibMove, int dwOrigin, IntPtr plibNewPosition) {
+        long pos = _stream.Seek(dlibMove, (SeekOrigin)dwOrigin);
+        if (plibNewPosition != IntPtr.Zero) Marshal.WriteInt64(plibNewPosition, pos);
+    }
+
+    public void SetSize(long libNewSize) {
+        _stream.SetLength(libNewSize);
+    }
+
+    public void CopyTo(IStream pstm, long cb, IntPtr pcbRead, IntPtr pcbWritten) {
+        throw new NotImplementedException();
+    }
+
+    public void Commit(int grfCommitFlags) {
+        _stream.Flush();
+    }
+
+    public void Revert() {
+        throw new NotImplementedException();
+    }
+
+    public void LockRegion(long libOffset, long cb, int dwLockType) {
+        throw new NotImplementedException();
+    }
+
+    public void UnlockRegion(long libOffset, long cb, int dwLockType) {
+        throw new NotImplementedException();
+    }
+
+    public void Stat(out STATSTG pstatstg, int grfStatFlag) {
+        pstatstg = new STATSTG();
+        pstatstg.type = 2; // STGTY_STREAM
+        pstatstg.cbSize = _stream.Length;
+    }
+
+    public void Clone(out IStream ppstm) {
+        throw new NotImplementedException();
+    }
+
+    public void Dispose() {
+        if (_stream != null) {
+            _stream.Dispose();
+            _stream = null;
+        }
+    }
+}
 "@
 
 try {
@@ -428,7 +493,7 @@ try {
     Write-Host "Processing $($files.Count) files"
 
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
-    $fsi.FileSystemsToCreate = 4  # ISO9660 + Joliet
+    $fsi.FileSystemsToCreate = 4  # UDF (supports files > 4GB)
     $fsi.VolumeName = $volumeName
 
     # Track created directories to avoid duplicates
@@ -501,13 +566,9 @@ try {
         Write-Host "  File size: $fileSizeMB MB"
 
         try {
-            $stream = New-Object -ComObject ADODB.Stream
-            $stream.Open()
-            $stream.Type = 1  # Binary
-
-            Write-Host "  Loading file into stream..."
-            $stream.LoadFromFile($file.path)
-            Write-Host "  File loaded successfully"
+            Write-Host "  Opening file stream..."
+            $stream = New-Object ManagedIStream($file.path)
+            Write-Host "  File stream opened successfully"
 
             # Add to appropriate directory
             Write-Host "  Adding to ISO structure..."
@@ -528,8 +589,8 @@ try {
             Write-Host "  Size: $fileSizeMB MB"
             Write-Host "  FileName: $fileName"
             Write-Host "  DirPath: $dirPath"
-            # Close stream on error
-            if ($stream) { $stream.Close() }
+            # Dispose stream on error
+            if ($stream) { $stream.Dispose() }
             throw $_
         }
     }
@@ -548,10 +609,10 @@ try {
     $imageStream = $resultImage.ImageStream
     [IStreamHelper]::CopyStreamToFile($imageStream, $targetPath)
 
-    # Now safe to close all streams
-    Write-Host "Closing $($openStreams.Count) file streams..."
+    # Now safe to dispose all streams
+    Write-Host "Disposing $($openStreams.Count) file streams..."
     foreach ($stream in $openStreams) {
-        try { $stream.Close() } catch { }
+        try { $stream.Dispose() } catch { }
     }
 
     $actualSize = (Get-Item $targetPath).Length
