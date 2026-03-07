@@ -494,6 +494,20 @@ try {
 
     $fsi = New-Object -ComObject IMAPI2FS.MsftFileSystemImage
     $fsi.FileSystemsToCreate = 4  # UDF (supports files > 4GB)
+    $fsi.UDFRevision = 0x0250     # UDF 2.50 required for files > 4GB
+
+    # Calculate total size and set FreeMediaBlocks to accommodate all files
+    $totalBytes = [int64]0
+    foreach ($f in $files) {
+        $totalBytes += (Get-Item $f.path).Length
+    }
+    # Add 10% overhead for filesystem metadata, minimum 1GB
+    $overhead = [Math]::Max($totalBytes * 0.1, 1GB)
+    $blockSize = 2048
+    $requiredBlocks = [int64][Math]::Ceiling(($totalBytes + $overhead) / $blockSize)
+    $fsi.FreeMediaBlocks = $requiredBlocks
+    Write-Host "Total file size: $([math]::Round($totalBytes / 1MB, 2)) MB, allocated $requiredBlocks blocks"
+
     $fsi.VolumeName = $volumeName
 
     # Track created directories to avoid duplicates
