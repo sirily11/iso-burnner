@@ -468,8 +468,8 @@ public class ManagedIStream : IStream, IDisposable {
         throw new NotImplementedException();
     }
 
-    public void Stat(out STATSTG pstatstg, int grfStatFlag) {
-        pstatstg = new STATSTG();
+    public void Stat(out System.Runtime.InteropServices.ComTypes.STATSTG pstatstg, int grfStatFlag) {
+        pstatstg = new System.Runtime.InteropServices.ComTypes.STATSTG();
         pstatstg.type = 2; // STGTY_STREAM
         pstatstg.cbSize = _stream.Length;
     }
