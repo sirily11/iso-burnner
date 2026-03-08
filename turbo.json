@@ -1,0 +1,37 @@
+{
+    "$schema": "https://turbo.build/schema.json",
+    "tasks": {
+        "build": {
+            "dependsOn": [
+                "^build"
+            ],
+            "outputs": [
+                "iso-bundler.exe"
+            ]
+        },
+        "build:win": {
+            "dependsOn": [
+                "^build"
+            ],
+            "outputs": [
+                "iso-bundler.exe"
+            ]
+        },
+        "test": {
+            "dependsOn": [
+                "^build"
+            ],
+            "cache": false,
+            "outputs": []
+        },
+        "lint": {
+            "outputs": []
+        },
+        "typecheck": {
+            "dependsOn": [
+                "^typecheck"
+            ],
+            "outputs": []
+        }
+    }
+}
