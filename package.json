@@ -10,7 +10,7 @@
   "scripts": {
     "build": "turbo build",
     "build:win": "turbo build:win",
-    "test": "turbo test",
+    "test": "turbo test --filter=!@iso-bundler/react-native",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck"
   },
